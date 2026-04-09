@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ThreatLens — Threat Prediction</title>
+<link rel="stylesheet" href="../css/style.css">
+<style>
+.chart-area{position:relative;height:260px;width:100%;margin:10px 0}
+canvas{position:absolute;inset:0;width:100%!important;height:100%!important}
+.model-card{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:14px}
+.model-metric{text-align:center;padding:10px}
+.model-num{font-size:22px;font-weight:500;margin:4px 0}
+.model-lbl{font-size:10px;color:var(--text4);text-transform:uppercase;letter-spacing:.05em}
+.pred-card{border-radius:10px;padding:12px 16px;border:1px solid;text-align:center}
+.insight-row{display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px solid #12181f;font-size:12px;color:var(--text3)}
+.insight-row:last-child{border-bottom:none}
+.insight-icon{width:28px;height:28px;border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.train-toggle{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+.train-btn{font-size:11px;padding:4px 12px;border-radius:20px;cursor:pointer;border:1px solid var(--border);color:var(--text3);background:transparent;font-family:inherit;transition:all .15s}
+.train-btn.active{background:#1a3a5c;color:var(--brand2);border-color:#1e4a7a}
+</style>
+</head>
+<body>
+<div id="sidebar"></div>
+<div class="main">
+  <div id="topbar"></div>
+  <div class="page">
+
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap">
+      <span style="font-size:16px;font-weight:500">Threat prediction</span>
+      <span style="font-size:11px;padding:2px 10px;border-radius:20px;background:#0f1520;color:var(--brand2);border:1px solid #1e3a5c;font-weight:500">Linear Regression Model</span>
+    </div>
+
+    <div style="background:#0a1020;border:1px solid #1e3050;border-radius:10px;padding:12px 16px;margin-bottom:16px;display:flex;align-items:flex-start;gap:10px">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style="flex-shrink:0;margin-top:1px"><path d="M2 12L6 7L9 10L13 4" stroke="#60a5fa" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><circle cx="13" cy="4" r="1.5" fill="#60a5fa"/></svg>
+      <span style="font-size:11px;color:var(--text3)">This model uses <strong style="color:var(--text2)">simple linear regression</strong> on your historical alert volume. It fits a line through past data points, calculates the trend slope, and extrapolates forward 3 days. The R² score shows how well the model fits the data (1.0 = perfect fit).</span>
+    </div>
+
+    <div class="train-toggle" id="dataset-toggle">
+      <button class="train-btn active" data-set="week7" onclick="setDataset(this)">Last 7 days</button>
+      <button class="train-btn" data-set="week14" onclick="setDataset(this)">Last 14 days</button>
+      <button class="train-btn" data-set="month" onclick="setDataset(this)">Last 30 days</button>
+      <button class="train-btn" data-set="custom" onclick="setDataset(this)">Custom (edit below)</button>
+    </div>
+
+    <div id="custom-input" style="display:none;margin-bottom:12px">
+      <div style="font-size:11px;color:var(--text4);margin-bottom:6px">Enter daily alert counts separated by commas (min 5 values):</div>
+      <div style="display:flex;gap:8px">
+        <input id="custom-data" type="text" class="search-bar" placeholder="e.g. 42, 68, 55, 91, 74, 38, 61" style="margin:0;flex:1">
+        <button class="btn btn-primary" onclick="applyCustom()">Apply</button>
+      </div>
+    </div>
+
+    <div class="grid-2" style="margin-bottom:14px">
+      <div class="model-card" style="grid-column:1/-1">
+        <div class="card-title">Historical data + 3-day prediction</div>
+        <div class="chart-area"><canvas id="pred-chart"></canvas></div>
+        <div style="display:flex;gap:16px;justify-content:center;font-size:11px;color:var(--text4);margin-top:4px">
+          <span style="display:flex;align-items:center;gap:5px"><span style="width:16px;height:3px;background:#378ADD;display:inline-block;border-radius:2px"></span>Historical data</span>
+          <span style="display:flex;align-items:center;gap:5px"><span style="width:16px;height:3px;background:#60a5fa;display:inline-block;border-radius:2px;opacity:.5;border:1px dashed #60a5fa"></span>Trend line</span>
+          <span style="display:flex;align-items:center;gap:5px"><span style="width:16px;height:3px;background:#f59e0b;display:inline-block;border-radius:2px"></span>Prediction (3 days)</span>
+        </div>
+      </div>
+    </div>
+
+    <div id="model-stats" class="grid-3" style="margin-bottom:14px"></div>
+
+    <div class="grid-2">
+      <div class="model-card">
+        <div class="card-title">3-day forecast</div>
+        <div id="forecast-cards" style="display:flex;flex-direction:column;gap:8px"></div>
+      </div>
+      <div class="model-card">
+        <div class="card-title">Model insights</div>
+        <div id="insights"></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script src="../js/data.js"></script>
+<script src="../js/ml.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<script>
+document.getElementById('sidebar').innerHTML = renderSidebar('Prediction');
+document.getElementById('topbar').innerHTML = renderTopbar('Threat Prediction');
+
+const DATASETS = {
+  week7:  { data:[42,68,55,91,74,38,61], label:'7-day' },
+  week14: { data:[38,51,42,68,55,91,74,38,61,70,85,62,49,78], label:'14-day' },
+  month:  { data:[35,42,50,38,51,42,68,55,91,74,38,61,70,85,62,49,78,55,44,67,80,72,58,45,63,88,71,54,41,69], label:'30-day' },
+};
+
+let currentData = DATASETS.week7.data;
+let chartInstance = null;
+
+function setDataset(btn){
+  document.querySelectorAll('.train-btn').forEach(x=>x.classList.remove('active'));
+  btn.classList.add('active');
+  const key = btn.dataset.set;
+  document.getElementById('custom-input').style.display = key==='custom'?'block':'none';
+  if(key !== 'custom'){ currentData = DATASETS[key].data; renderAll(); }
+}
+
+function applyCustom(){
+  const raw = document.getElementById('custom-data').value;
+  const vals = raw.split(',').map(v=>parseInt(v.trim())).filter(v=>!isNaN(v));
+  if(vals.length < 5){ alert('Please enter at least 5 values'); return; }
+  currentData = vals; renderAll();
+}
+
+function renderAll(){
+  const hist = currentData;
+  const preds = ML.predict(hist, 3);
+  const r2 = ML.rSquared(hist);
+  const trend = ML.trendDirection(hist);
+  const {slope, intercept} = ML.linearRegression(hist);
+  const mean = Math.round(hist.reduce((a,b)=>a+b,0)/hist.length);
+  const max = Math.max(...hist);
+
+  const trendLine = hist.map((_,i) => Math.round(intercept + slope*i));
+  const days = hist.map((_,i) => `Day ${i+1}`);
+  const predDays = ['Pred D+1','Pred D+2','Pred D+3'];
+
+  if(chartInstance) chartInstance.destroy();
+  const ctx = document.getElementById('pred-chart').getContext('2d');
+  chartInstance = new Chart(ctx, {
+    type:'line',
+    data:{
+      labels:[...days,...predDays],
+      datasets:[
+        {
+          label:'Historical',
+          data:[...hist,...Array(3).fill(null)],
+          borderColor:'#378ADD', backgroundColor:'rgba(55,138,221,.08)',
+          tension:.3, pointRadius:4, pointBackgroundColor:'#378ADD',
+          borderWidth:2, fill:true,
+        },
+        {
+          label:'Trend line',
+          data:trendLine.map((v,i)=>({x:i,y:v})).concat([]),
+          borderColor:'rgba(96,165,250,.4)', borderDash:[5,5],
+          tension:0, pointRadius:0, borderWidth:1.5, fill:false,
+          data:[...trendLine,...Array(3).fill(null)],
+        },
+        {
+          label:'Prediction',
+          data:[...Array(hist.length).fill(null),...preds],
+          borderColor:'#f59e0b', backgroundColor:'rgba(245,158,11,.12)',
+          tension:.3, pointRadius:5, pointBackgroundColor:'#f59e0b',
+          borderWidth:2, fill:true, borderDash:[6,3],
+        },
+      ]
+    },
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{display:false}, tooltip:{
+        backgroundColor:'#111827', borderColor:'#1e2530', borderWidth:1,
+        titleColor:'#e2e8f0', bodyColor:'#8b949e',
+        callbacks:{ label: ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y ?? 'N/A'} alerts` }
+      }},
+      scales:{
+        x:{ grid:{color:'#12181f'}, ticks:{color:'#6b7280',font:{size:10}},
+          border:{color:'#1e2530'} },
+        y:{ grid:{color:'#12181f'}, ticks:{color:'#6b7280',font:{size:10}},
+          border:{color:'#1e2530'} },
+      }
+    }
+  });
+
+  document.getElementById('model-stats').innerHTML = [
+    {label:'R² score',    num:r2.toFixed(3),  note:'Model fit quality', color: r2>0.7?'var(--green)':r2>0.4?'var(--amber)':'var(--red)'},
+    {label:'Trend slope', num:(slope>0?'+':'')+slope.toFixed(1)+'/day', note:'Alert change per day', color:slope>3?'var(--red)':slope<-3?'var(--green)':'var(--blue)'},
+    {label:'Daily average',num:mean,           note:'Avg over training window', color:'var(--text)'},
+    {label:'Peak day',    num:max,             note:'Highest single day', color:'var(--amber)'},
+    {label:'Trend',       num:trend.arrow+' '+trend.label, note:'Overall direction', color:trend.color},
+    {label:'Training pts',num:hist.length,     note:'Days of data used', color:'var(--text3)'},
+  ].map(m=>`<div class="model-card model-metric">
+    <div class="model-lbl">${m.label}</div>
+    <div class="model-num" style="color:${m.color}">${m.num}</div>
+    <div style="font-size:10px;color:var(--text4);margin-top:2px">${m.note}</div>
+  </div>`).join('');
+
+  const today = new Date();
+  document.getElementById('forecast-cards').innerHTML = preds.map((p,i)=>{
+    const d = new Date(today); d.setDate(d.getDate()+i+1);
+    const label = d.toLocaleDateString('en-IN',{weekday:'short',day:'numeric',month:'short'});
+    const diff = p - mean;
+    const {color} = ML.anomalyLabel(Math.min(99,Math.round((p/max)*85+15)));
+    return `<div class="pred-card" style="background:${color}15;border-color:${color}40">
+      <div style="font-size:10px;color:var(--text4);margin-bottom:4px">${label}</div>
+      <div style="font-size:24px;font-weight:500;color:${color}">${p}</div>
+      <div style="font-size:10px;color:var(--text4);margin-top:3px">expected alerts &nbsp;·&nbsp; <span style="color:${diff>0?'var(--red)':'var(--green)'}">${diff>0?'+':''}${diff} vs avg</span></div>
+    </div>`;
+  }).join('');
+
+  const insights = [
+    r2 > 0.7
+      ? {icon:'✓', color:'var(--green-bg)', iconColor:'var(--green)', text:`Strong model fit (R²=${r2.toFixed(2)}). The prediction is reliable — past data shows a consistent pattern.`}
+      : {icon:'!', color:'var(--amber-bg)', iconColor:'var(--amber)', text:`Moderate fit (R²=${r2.toFixed(2)}). Alert volume is noisy. Prediction gives a rough estimate only — add more training data for better accuracy.`},
+    slope > 3
+      ? {icon:'↑', color:'var(--red-bg)', iconColor:'var(--red)', text:`Alert volume is rising by ~${slope.toFixed(1)} alerts/day. Recommend increasing analyst capacity in the next 72 hours.`}
+      : slope < -3
+      ? {icon:'↓', color:'var(--green-bg)', iconColor:'var(--green)', text:`Alert volume is declining by ~${Math.abs(slope).toFixed(1)} alerts/day. Threat activity appears to be decreasing.`}
+      : {icon:'→', color:'var(--blue-bg)', iconColor:'var(--blue)', text:`Alert volume is stable with a slope of ${slope.toFixed(1)}/day. No major surge predicted in the next 3 days.`},
+    {icon:'i', color:'#0f1520', iconColor:'var(--brand2)', text:`This model uses ordinary least squares linear regression. It works best when alert volume follows a consistent trend. Sudden spikes (like zero-day events) cannot be predicted.`},
+  ];
+
+  document.getElementById('insights').innerHTML = insights.map(ins=>`
+    <div class="insight-row">
+      <div class="insight-icon" style="background:${ins.color};color:${ins.iconColor};font-size:12px;font-weight:500">${ins.icon}</div>
+      <span>${ins.text}</span>
+    </div>`).join('');
+}
+
+renderAll();
+</script>
+</body>
+</html>

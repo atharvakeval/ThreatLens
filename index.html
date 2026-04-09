@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ThreatLens — Dashboard</title>
+<link rel="stylesheet" href="css/style.css">
+<style>
+.map-box{background:#0A0E15;border-radius:10px;border:1px solid var(--border);padding:14px;position:relative;height:170px;overflow:hidden}
+.map-dot{position:absolute;border-radius:50%}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.4;transform:scale(2)}}
+.pulse{animation:pulse 2s ease-in-out infinite}
+</style>
+</head>
+<body>
+<div id="sidebar"></div>
+<div class="main">
+  <div id="topbar"></div>
+  <div class="page">
+    <div id="metrics" class="metrics-grid"></div>
+    <div class="dashboard-layout">
+      <div class="content-left">
+        <div class="card">
+          <div class="card-title">Attack origin map</div>
+          <div class="map-box" id="map">
+            <svg width="100%" height="100%" viewBox="0 0 500 140" style="opacity:.35">
+              <g stroke="#1e3a5c" stroke-width="0.5" fill="none">
+                <ellipse cx="250" cy="70" rx="220" ry="60"/>
+                <ellipse cx="250" cy="70" rx="160" ry="60"/>
+                <ellipse cx="250" cy="70" rx="100" ry="60"/>
+                <line x1="30" y1="70" x2="470" y2="70"/>
+                <line x1="250" y1="10" x2="250" y2="130"/>
+                <path d="M30 45Q250 35 470 45"/>
+                <path d="M30 95Q250 105 470 95"/>
+              </g>
+              <g fill="#1d4e89">
+                <rect x="55" y="35" width="70" height="50" rx="3"/>
+                <rect x="170" y="28" width="55" height="65" rx="3"/>
+                <rect x="250" y="32" width="65" height="58" rx="3"/>
+                <rect x="340" y="40" width="35" height="45" rx="3"/>
+                <rect x="80" y="88" width="45" height="30" rx="3"/>
+                <rect x="380" y="45" width="28" height="40" rx="3"/>
+              </g>
+            </svg>
+            <div class="map-dot pulse" style="width:11px;height:11px;background:#ef4444;top:36%;left:18%;box-shadow:0 0 0 4px rgba(239,68,68,.15)"></div>
+            <div class="map-dot pulse" style="width:9px;height:9px;background:#ef4444;top:28%;left:56%;box-shadow:0 0 0 4px rgba(239,68,68,.15);animation-delay:.6s"></div>
+            <div class="map-dot" style="width:7px;height:7px;background:#f59e0b;top:52%;left:42%"></div>
+            <div class="map-dot" style="width:7px;height:7px;background:#f59e0b;top:32%;left:70%"></div>
+            <div class="map-dot" style="width:6px;height:6px;background:#60a5fa;top:46%;left:27%"></div>
+            <div class="map-dot" style="width:5px;height:5px;background:#60a5fa;top:40%;left:79%"></div>
+            <div style="position:absolute;bottom:8px;right:10px;display:flex;gap:10px">
+              <span style="font-size:9px;color:#6b7280;display:flex;align-items:center;gap:3px"><span style="width:6px;height:6px;border-radius:50%;background:#ef4444;display:inline-block"></span>Critical</span>
+              <span style="font-size:9px;color:#6b7280;display:flex;align-items:center;gap:3px"><span style="width:6px;height:6px;border-radius:50%;background:#f59e0b;display:inline-block"></span>High</span>
+              <span style="font-size:9px;color:#6b7280;display:flex;align-items:center;gap:3px"><span style="width:6px;height:6px;border-radius:50%;background:#60a5fa;display:inline-block"></span>Medium</span>
+            </div>
+          </div>
+        </div>
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-title">Live threat feed</div>
+            <div class="filter-tabs">
+              <button class="ftab active" onclick="filterFeed('all',this)">All</button>
+              <button class="ftab critical" onclick="filterFeed('critical',this)">Critical</button>
+              <button class="ftab high" onclick="filterFeed('high',this)">High</button>
+            </div>
+            <div id="feed"></div>
+            <div style="margin-top:8px;text-align:center">
+              <a href="pages/threats.html" style="font-size:11px;color:var(--brand)">View all alerts &rarr;</a>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-title">Top attack vectors</div>
+            <div id="attack-bars"></div>
+            <div class="card-title" style="margin-top:14px">7-day alert trend</div>
+            <div class="mini-bars" id="trend-chart"></div>
+          </div>
+        </div>
+      </div>
+      <div class="content-right">
+        <div class="card">
+          <div class="card-title">System status</div>
+          <div id="systems"></div>
+        </div>
+        <div class="card">
+          <div class="card-title">Top targeted systems</div>
+          <div id="targets"></div>
+        </div>
+        <div class="card">
+          <div class="card-title">Team activity</div>
+          <div id="activity"></div>
+        </div>
+        <div class="card">
+          <div class="card-title">Quick actions</div>
+          <a href="pages/threats.html" class="quick-btn info">New incident report &rarr;</a>
+          <a href="pages/reports.html" class="quick-btn success">Export weekly report &rarr;</a>
+          <a href="#" class="quick-btn warning" onclick="alert('Alert thresholds — coming in Settings page')">Update alert thresholds &rarr;</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="js/data.js"></script>
+<script>
+document.getElementById('sidebar').innerHTML = renderSidebar('Dashboard');
+document.getElementById('topbar').innerHTML = renderTopbar('ThreatLens');
+
+const counts = {critical:0,high:0,medium:0,low:0};
+ALERTS.forEach(a=>{ if(a.status!=='resolved') counts[a.severity]=(counts[a.severity]||0)+1; });
+
+document.getElementById('metrics').innerHTML = [
+  {cls:'critical',label:'Critical',num:counts.critical,sub:'+3 from yesterday',up:true},
+  {cls:'high',label:'High',num:counts.high,sub:'-5 from yesterday',up:false},
+  {cls:'medium',label:'Medium',num:counts.medium,sub:'stable this week',up:null},
+  {cls:'low',label:'Low',num:ALERTS.filter(a=>a.severity==='low').length,sub:'resolved 89%',up:false},
+].map(m=>`<div class="metric-card ${m.cls}">
+  <div class="metric-label">${m.cls}</div>
+  <div class="metric-num">${m.num}</div>
+  <div class="metric-sub">${m.up===true?'&#8593;':m.up===false?'&#8595;':''} ${m.sub}</div>
+</div>`).join('');
+
+function filterFeed(sev, btn){
+  document.querySelectorAll('.filter-tabs .ftab').forEach(t=>t.classList.remove('active'));
+  btn.classList.add('active');
+  const rows = document.querySelectorAll('#feed .alert-row');
+  rows.forEach(r=>{
+    r.style.display = (sev==='all'||r.dataset.severity===sev)?'flex':'none';
+  });
+}
+
+document.getElementById('feed').innerHTML = ALERTS.slice(0,6).map(a=>renderAlertRow(a)).join('');
+
+document.getElementById('attack-bars').innerHTML = ATTACK_TYPES.map(a=>`
+  <div class="bar-row">
+    <span class="bar-label">${a.label}</span>
+    <div class="bar-bg"><div class="bar-fill" style="width:${Math.round(a.count/82*100)}%;background:${sevColor(a.severity)}"></div></div>
+    <span class="bar-val">${a.count}</span>
+  </div>`).join('');
+
+miniBarChart(WEEK_DATA, WEEK_DAYS, 'trend-chart');
+
+document.getElementById('systems').innerHTML = SYSTEMS.map(s=>`
+  <div class="status-row"><span style="color:var(--text3);font-size:12px">${s.name}</span><span class="${s.cls}">${s.status}</span></div>`).join('');
+
+document.getElementById('targets').innerHTML = TARGETS.map(t=>`
+  <div class="target-card ${t.severity}">
+    <div class="target-name">${t.name}</div>
+    <div class="target-meta">${t.attempts} attempts &nbsp;·&nbsp; <span class="sev-badge ${t.severity}">${t.severity}</span></div>
+  </div>`).join('');
+
+document.getElementById('activity').innerHTML = TEAM.map(t=>`
+  <div class="activity-item">
+    <div class="act-dot" style="background:${t.color}"></div>
+    <div class="act-text"><span class="act-who">${t.who}</span> ${t.action}</div>
+  </div>`).join('');
+
+setInterval(()=>{
+  document.querySelector('.timestamp').textContent = `Updated just now · ${new Date().toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'})}`;
+},60000);
+</script>
+</body>
+</html>

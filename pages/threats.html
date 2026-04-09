@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ThreatLens — Threat Feed</title>
+<link rel="stylesheet" href="../css/style.css">
+<style>
+.anomaly-score{display:flex;flex-direction:column;align-items:center;gap:2px;flex-shrink:0;width:52px}
+.score-ring{position:relative;width:36px;height:36px}
+.score-num{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:500}
+.score-lbl{font-size:9px;color:var(--text4);text-align:center;white-space:nowrap}
+.explain-panel{background:#0a1020;border:1px solid #1e3050;border-radius:0 0 8px 8px;padding:12px;font-size:11px;color:var(--text3);line-height:1.6;display:none;margin-bottom:2px}
+.explain-panel.open{display:block}
+.alert-wrapper{border-bottom:1px solid #12181f}
+.alert-wrapper:last-child{border-bottom:none}
+.factor-bar{display:flex;align-items:center;gap:8px;margin-bottom:5px}
+.factor-name{width:110px;flex-shrink:0;font-size:10px;color:var(--text4)}
+.factor-bg{flex:1;height:5px;background:var(--border);border-radius:3px;overflow:hidden}
+.factor-fill{height:100%;border-radius:3px}
+.factor-val{width:30px;text-align:right;font-size:10px;color:var(--text3)}
+.sort-pill{font-size:11px;padding:4px 12px;border-radius:20px;cursor:pointer;border:1px solid var(--border);color:var(--text3);background:transparent;transition:all .15s;font-family:inherit}
+.sort-pill.active{background:#1a3a5c;color:var(--brand2);border-color:#1e4a7a}
+</style>
+</head>
+<body>
+<div id="sidebar"></div>
+<div class="main">
+  <div id="topbar"></div>
+  <div class="page">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:10px">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <span style="font-size:16px;font-weight:500">Threat feed</span>
+        <span id="count-badge" style="font-size:11px;padding:2px 10px;border-radius:20px;background:var(--red-bg);color:var(--red);border:1px solid var(--red-border);font-weight:500"></span>
+        <span style="font-size:11px;padding:2px 10px;border-radius:20px;background:#0f1520;color:var(--brand2);border:1px solid #1e3a5c;font-weight:500">ML scoring active</span>
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <button class="sort-pill active" data-sort="anomaly" onclick="setSort(this)">Anomaly score</button>
+        <button class="sort-pill" data-sort="newest" onclick="setSort(this)">Newest</button>
+        <button class="sort-pill" data-sort="severity" onclick="setSort(this)">Severity</button>
+      </div>
+    </div>
+
+    <input class="search-bar" id="search" placeholder="Search by title, IP, or attack type..." oninput="renderAlerts()">
+
+    <div class="filter-tabs" id="tabs">
+      <button class="ftab active" data-sev="all">All</button>
+      <button class="ftab critical" data-sev="critical">Critical</button>
+      <button class="ftab high" data-sev="high">High</button>
+      <button class="ftab medium" data-sev="medium">Medium</button>
+      <button class="ftab low" data-sev="low">Low</button>
+      <button class="ftab" data-sev="resolved" style="margin-left:auto">Resolved</button>
+    </div>
+
+    <div style="background:#0a1020;border:1px solid #1e3050;border-radius:10px;padding:10px 14px;margin-bottom:14px;display:flex;align-items:flex-start;gap:10px">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style="flex-shrink:0;margin-top:1px"><circle cx="8" cy="8" r="6" stroke="#60a5fa" stroke-width="1.2"/><path d="M8 5v3l2 1" stroke="#60a5fa" stroke-width="1.2" stroke-linecap="round"/></svg>
+      <span style="font-size:11px;color:var(--text3)">Each alert is scored 0–100 by the ML engine using <strong style="color:var(--text2)">5 factors</strong>: attack type weight, severity, recency, source IP reputation, and repeat pattern detection. <strong style="color:var(--brand2)">Click any score ring</strong> to see the full factor breakdown.</span>
+    </div>
+
+    <div class="card" style="padding:8px">
+      <div id="alert-list"></div>
+      <div id="empty" style="display:none;text-align:center;padding:40px;color:var(--text4);font-size:13px">No alerts match this filter</div>
+    </div>
+  </div>
+</div>
+<script src="../js/data.js"></script>
+<script src="../js/ml.js"></script>
+<script>
+document.getElementById('sidebar').innerHTML = renderSidebar('Threat Feed');
+document.getElementById('topbar').innerHTML = renderTopbar('Threat Feed');
+
+const scoredAlerts = ML.scoreAll(ALERTS);
+document.getElementById('count-badge').textContent = scoredAlerts.filter(a=>a.status!=='resolved').length + ' active';
+
+let currentSev='all', currentSort='anomaly';
+
+document.querySelectorAll('#tabs .ftab').forEach(t=>{
+  t.addEventListener('click',function(){
+    document.querySelectorAll('#tabs .ftab').forEach(x=>x.classList.remove('active'));
+    this.classList.add('active'); currentSev=this.dataset.sev; renderAlerts();
+  });
+});
+
+function setSort(btn){
+  document.querySelectorAll('.sort-pill').forEach(x=>x.classList.remove('active'));
+  btn.classList.add('active'); currentSort=btn.dataset.sort; renderAlerts();
+}
+
+function scoreRingSVG(score, color){
+  const r=14, circ=2*Math.PI*r, fill=(score/100)*circ;
+  return `<svg width="36" height="36" viewBox="0 0 36 36">
+    <circle cx="18" cy="18" r="${r}" fill="none" stroke="#1e2530" stroke-width="3.5"/>
+    <circle cx="18" cy="18" r="${r}" fill="none" stroke="${color}" stroke-width="3.5"
+      stroke-dasharray="${fill.toFixed(1)} ${circ.toFixed(1)}"
+      stroke-linecap="round" transform="rotate(-90 18 18)"/>
+  </svg>`;
+}
+
+function factorBreakdown(a){
+  const typeW=({'Injection':95,'Lateral movement':92,'Malware':90,'Privilege Escalation':88,'Exfiltration':86,'C2 Communication':85,'Credential':72,'Execution':75,'Recon':55,'Account':50,'Data transfer':45,'Config':30})[a.type]||50;
+  const sevW=({critical:100,high:75,medium:45,low:20})[a.severity]||30;
+  const mm=a.time.match(/(\d+)(m|h) ago/);
+  const mins=mm?(mm[2]==='h'?parseInt(mm[1])*60:parseInt(mm[1])):60;
+  const recency=mins<=5?100:mins<=15?85:mins<=60?65:40;
+  const src=/^45\.|^89\.|^196\./.test(a.source)?95:/^10\.|^172\.|^192\./.test(a.source)?50:70;
+  const repeat=Math.min(100,50+scoredAlerts.filter(x=>x.source===a.source&&x.id!==a.id).length*10);
+  return [
+    {name:'Attack type weight',val:typeW,color:'#ef4444',weight:'30%'},
+    {name:'Severity level',val:sevW,color:'#f59e0b',weight:'25%'},
+    {name:'Recency',val:recency,color:'#60a5fa',weight:'20%'},
+    {name:'Source reputation',val:src,color:'#a78bfa',weight:'15%'},
+    {name:'Repeat pattern',val:repeat,color:'#f472b6',weight:'10%'},
+  ];
+}
+
+function renderAlerts(){
+  const q=document.getElementById('search').value.toLowerCase();
+  const sevOrder={critical:0,high:1,medium:2,low:3};
+  let data=scoredAlerts.filter(a=>{
+    const sm=currentSev==='all'?a.status!=='resolved':currentSev==='resolved'?a.status==='resolved':a.severity===currentSev;
+    const tm=!q||a.title.toLowerCase().includes(q)||a.source.toLowerCase().includes(q)||a.type.toLowerCase().includes(q);
+    return sm&&tm;
+  });
+  if(currentSort==='anomaly')  data.sort((a,b)=>b.anomaly-a.anomaly);
+  if(currentSort==='severity') data.sort((a,b)=>(sevOrder[a.severity]||4)-(sevOrder[b.severity]||4));
+
+  const list=document.getElementById('alert-list');
+  const empty=document.getElementById('empty');
+  if(!data.length){list.innerHTML='';empty.style.display='block';return;}
+  empty.style.display='none';
+
+  list.innerHTML=data.map(a=>{
+    const {color,label}=ML.anomalyLabel(a.anomaly);
+    const factors=factorBreakdown(a);
+    return `<div class="alert-wrapper">
+      <div class="alert-row" data-severity="${a.severity}" style="cursor:pointer" onclick="toggleExplain('${a.id}')">
+        <div class="anomaly-score">
+          <div class="score-ring">${scoreRingSVG(a.anomaly,color)}<div class="score-num" style="color:${color}">${a.anomaly}</div></div>
+          <div class="score-lbl" style="color:${color}">${label.split(' ')[0]}</div>
+        </div>
+        <div class="sev-dot ${a.severity}" style="flex-shrink:0"></div>
+        <div style="font-size:10px;color:var(--text4);font-family:monospace;width:65px;flex-shrink:0">${a.id}</div>
+        <div class="alert-info">
+          <div class="alert-title">${a.title}</div>
+          <div class="alert-meta">${a.source}&nbsp;·&nbsp;${a.type}</div>
+        </div>
+        <span class="sev-badge ${a.status==='resolved'?'resolved':a.severity}" style="flex-shrink:0">${a.severity}</span>
+        <div class="alert-time">${a.time}</div>
+        <div class="alert-actions" onclick="event.stopPropagation()">
+          <a href="incident.html?id=${a.id}" class="btn-sm investigate">Investigate</a>
+          <button class="btn-sm escalate" onclick="">Escalate</button>
+          <button class="btn-sm dismiss" onclick="this.closest('.alert-wrapper').remove()">Dismiss</button>
+        </div>
+      </div>
+      <div class="explain-panel" id="explain-${a.id}">
+        <div style="font-size:10px;color:var(--text4);margin-bottom:8px;font-weight:500">ML factor breakdown — ${a.id} &nbsp;·&nbsp; Final score: <span style="color:${color}">${a.anomaly}/100</span> — ${label}</div>
+        ${factors.map(f=>`<div class="factor-bar">
+          <span class="factor-name">${f.name} <span style="color:#3a4a5c">(${f.weight})</span></span>
+          <div class="factor-bg"><div class="factor-fill" style="width:${f.val}%;background:${f.color}"></div></div>
+          <span class="factor-val" style="color:${f.color}">${f.val}</span>
+        </div>`).join('')}
+        <div style="margin-top:8px;font-size:10px;color:var(--text4)">Higher score = more anomalous. Sorted by weighted contribution to the final score.</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function toggleExplain(id){
+  document.getElementById('explain-'+id)?.classList.toggle('open');
+}
+
+renderAlerts();
+</script>
+</body>
+</html>

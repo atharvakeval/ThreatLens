@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ThreatLens — Incident Detail</title>
+<link rel="stylesheet" href="../css/style.css">
+<style>
+.detail-grid{display:grid;grid-template-columns:1fr 280px;gap:14px}
+@media(max-width:900px){.detail-grid{grid-template-columns:1fr}}
+.info-row{display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid #12181f;font-size:12px}
+.info-row:last-child{border-bottom:none}
+.info-label{color:var(--text4)}
+.info-val{color:var(--text2);font-family:monospace;font-size:11px}
+.mitre-tag{display:inline-block;font-size:10px;padding:3px 10px;border-radius:6px;background:#0f1520;color:#93c5fd;border:1px solid #1e3a5c;margin:3px;font-family:monospace}
+.notes-area{width:100%;background:var(--bg2);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:10px;font-size:12px;font-family:inherit;resize:vertical;min-height:80px;outline:none}
+.notes-area:focus{border-color:var(--brand)}
+</style>
+</head>
+<body>
+<div id="sidebar"></div>
+<div class="main">
+  <div id="topbar"></div>
+  <div class="page" id="page-content">
+    <div style="font-size:11px;color:var(--text4);margin-bottom:14px">
+      <a href="../index.html" style="color:var(--brand)">Dashboard</a> &nbsp;&rsaquo;&nbsp;
+      <a href="threats.html" style="color:var(--brand)">Threat Feed</a> &nbsp;&rsaquo;&nbsp;
+      <span id="breadcrumb-id"></span>
+    </div>
+
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap">
+      <div>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <span id="inc-id" style="font-size:12px;font-family:monospace;color:var(--text4)"></span>
+          <h1 id="inc-title" style="font-size:17px;font-weight:500"></h1>
+          <span id="inc-sev" class="sev-badge"></span>
+          <span id="inc-status" class="sev-badge"></span>
+        </div>
+        <div id="inc-meta" style="font-size:11px;color:var(--text4);margin-top:6px;font-family:monospace"></div>
+      </div>
+    </div>
+
+    <div id="stepper-container" style="margin-bottom:16px"></div>
+
+    <div class="detail-grid">
+      <div style="display:flex;flex-direction:column;gap:14px">
+        <div class="card">
+          <div class="card-title">Attack timeline</div>
+          <div class="timeline" id="timeline"></div>
+        </div>
+        <div class="card">
+          <div class="card-title">Attack chain</div>
+          <div id="attack-chain" style="display:flex;align-items:center;gap:0;overflow-x:auto;padding:4px 0"></div>
+        </div>
+        <div class="card">
+          <div class="card-title">Analyst notes</div>
+          <textarea class="notes-area" placeholder="Add investigation notes here..."></textarea>
+          <div style="margin-top:8px;display:flex;gap:8px">
+            <button class="btn btn-primary" onclick="this.textContent='Saved!';setTimeout(()=>this.textContent='Save notes',1500)">Save notes</button>
+            <button class="btn btn-ghost">Assign to me</button>
+          </div>
+        </div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:14px">
+        <div class="card">
+          <div class="card-title">Incident info</div>
+          <div id="inc-info"></div>
+        </div>
+        <div class="card">
+          <div class="card-title">Affected assets</div>
+          <div id="assets"></div>
+        </div>
+        <div class="card" id="mitre-card" style="display:none">
+          <div class="card-title">MITRE ATT&CK</div>
+          <div id="mitre-tags"></div>
+        </div>
+        <div class="card">
+          <div class="card-title">Resolution</div>
+          <div style="display:flex;flex-direction:column;gap:6px" id="action-btns">
+            <button class="btn btn-success" onclick="markResolved()">Mark as resolved</button>
+            <button class="btn btn-danger" onclick="alert('Escalated to security manager')">Escalate to manager</button>
+            <button class="btn btn-ghost" onclick="alert('Marked as false positive')">False positive</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="../js/data.js"></script>
+<script>
+document.getElementById('sidebar').innerHTML = renderSidebar('Threat Feed');
+
+const params = new URLSearchParams(window.location.search);
+const id = params.get('id') || 'TL-2041';
+const alert = ALERTS.find(a=>a.id===id) || ALERTS[0];
+
+document.title = `ThreatLens — ${alert.id}`;
+document.getElementById('topbar').innerHTML = renderTopbar(alert.id);
+document.getElementById('breadcrumb-id').textContent = alert.id;
+document.getElementById('inc-id').textContent = alert.id;
+document.getElementById('inc-title').textContent = alert.title;
+document.getElementById('inc-meta').textContent = `Source: ${alert.source}  ·  Type: ${alert.type}  ·  Detected: ${alert.time}`;
+
+const sevEl = document.getElementById('inc-sev');
+sevEl.textContent = alert.severity;
+sevEl.className = `sev-badge ${alert.severity}`;
+
+const statusEl = document.getElementById('inc-status');
+statusEl.textContent = alert.status;
+statusEl.className = `sev-badge ${alert.status==='resolved'?'resolved':alert.status==='investigating'?'medium':'low'}`;
+
+const steps = ['Open','Investigating','Resolved'];
+const stepIdx = alert.status==='open'?0:alert.status==='investigating'?1:2;
+document.getElementById('stepper-container').innerHTML = `<div class="stepper">
+  ${steps.map((s,i)=>`
+    ${i>0?`<div class="step-line${i<=stepIdx?' done':''}"></div>`:''}
+    <div class="step">
+      <div class="step-circle${i<stepIdx?' done':i===stepIdx?' active':''}">${i<stepIdx?'&#10003;':i+1}</div>
+      <div class="step-label">${s}</div>
+    </div>`).join('')}
+</div>`;
+
+const timelines = {
+  'TL-2041':[
+    {time:'14:32:01',text:'Initial SQL injection pattern detected on /api/login endpoint',sev:'critical'},
+    {time:'14:32:03',text:'IDS rule triggered — SQLI-001 matched payload in POST body',sev:'high'},
+    {time:'14:32:05',text:'Source IP 192.168.4.21 flagged — 3rd attempt this session',sev:'high'},
+    {time:'14:32:10',text:'Alert escalated to active investigation queue',sev:'medium'},
+    {time:'14:35:00',text:'Analyst Riya assigned — reviewing logs',sev:'low'},
+  ],
+  'TL-2040':[
+    {time:'14:27:14',text:'Unusual process spawn detected on host 10.0.0.44',sev:'critical'},
+    {time:'14:27:16',text:'cmd.exe spawned by web server process — lateral movement pattern',sev:'critical'},
+    {time:'14:27:20',text:'New admin group membership detected — unauthorized change',sev:'high'},
+    {time:'14:28:00',text:'Alert auto-escalated due to privilege escalation signature match',sev:'high'},
+  ],
+};
+const tl = timelines[id] || timelines['TL-2041'];
+document.getElementById('timeline').innerHTML = tl.map(t=>`
+  <div class="timeline-item">
+    <div class="timeline-dot" style="background:${sevColor(t.sev)};border-color:var(--bg)"></div>
+    <div class="timeline-time">${t.time}</div>
+    <div class="timeline-text">${t.text}</div>
+  </div>`).join('');
+
+const chains = {
+  'TL-2041':['Recon','Initial Access','Execution','Privilege Escalation'],
+  'TL-2040':['Initial Access','Execution','Privilege Escalation','Lateral Movement'],
+  default:['Recon','Initial Access','Execution','Impact'],
+};
+const chain = chains[id]||chains.default;
+const chainColors = ['#1e3a5c','#3a1010','#3a2800','#1e3050'];
+document.getElementById('attack-chain').innerHTML = chain.map((c,i)=>`
+  ${i>0?'<div style="width:20px;height:1px;background:var(--border);flex-shrink:0"></div>':''}
+  <div style="padding:7px 12px;border-radius:8px;font-size:11px;font-weight:500;color:${sevColor(['critical','high','medium','low'][i]||'medium')};background:${chainColors[i]};border:1px solid ${sevColor(['critical','high','medium','low'][i]||'medium')}40;white-space:nowrap">${c}</div>`).join('');
+
+document.getElementById('inc-info').innerHTML = [
+  ['Alert ID', alert.id],
+  ['Source IP', alert.source],
+  ['Attack type', alert.type],
+  ['First seen', alert.time],
+  ['Last activity', '2 min ago'],
+  ['Assigned to', 'Riya Joshi'],
+].map(([l,v])=>`<div class="info-row"><span class="info-label">${l}</span><span class="info-val">${v}</span></div>`).join('');
+
+document.getElementById('assets').innerHTML = ['api-gateway-01','auth-service-02','db-prod-01'].map(a=>`
+  <div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid #12181f;font-size:11px">
+    <div class="sev-dot ${['critical','high','medium'][['api-gateway-01','auth-service-02','db-prod-01'].indexOf(a)]}"></div>
+    <span style="font-family:monospace;color:var(--text2)">${a}</span>
+  </div>`).join('');
+
+const mitre = MITRE[id];
+if(mitre){
+  document.getElementById('mitre-card').style.display='block';
+  document.getElementById('mitre-tags').innerHTML = mitre.map(m=>`<span class="mitre-tag">${m}</span>`).join('');
+}
+
+function markResolved(){
+  statusEl.textContent='resolved';
+  statusEl.className='sev-badge resolved';
+  const circles = document.querySelectorAll('.step-circle');
+  circles.forEach(c=>{c.className='step-circle done';c.innerHTML='&#10003;'});
+  document.querySelectorAll('.step-line').forEach(l=>l.classList.add('done'));
+  document.getElementById('action-btns').innerHTML='<div style="text-align:center;padding:10px;color:var(--green);font-size:13px;font-weight:500">&#10003; Incident resolved</div>';
+}
+</script>
+</body>
+</html>
