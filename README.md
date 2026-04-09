@@ -4,7 +4,7 @@ A fully working interactive web application built as a UX/Frontend portfolio pro
 No frameworks, no installs — just open `index.html` in your browser.
 
 ## Live Demo
-> Deploy to GitHub Pages and paste your link here
+https://atharvakeval.github.io/ThreatLens/
 
 ## What this project does
 
